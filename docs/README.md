@@ -39,7 +39,7 @@ Remote Client (Laptop/Mobile)
 gcloud compute ssh ip-relay-vm --zone=us-central1-a
 
 # Run setup script
-curl -O https://raw.githubusercontent.com/your-repo/relay-vm-setup.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/relay-vm-setup.sh
 chmod +x relay-vm-setup.sh
 ./relay-vm-setup.sh
 ```

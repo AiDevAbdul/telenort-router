@@ -27,7 +27,7 @@
 
 3. Download and run the setup script:
    ```bash
-   curl -O https://raw.githubusercontent.com/your-repo/relay-vm-setup.sh
+   curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/relay-vm-setup.sh
    chmod +x relay-vm-setup.sh
    ./relay-vm-setup.sh
    ```
@@ -53,7 +53,7 @@
 
 1. Download the exit agent script:
    ```bash
-   curl -O https://raw.githubusercontent.com/your-repo/exit-agent.sh
+   curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/exit-agent.sh
    chmod +x exit-agent.sh
    ```
 
@@ -87,7 +87,7 @@
 
 1. Download the remote client setup script:
    ```bash
-   curl -O https://raw.githubusercontent.com/your-repo/remote-client-setup.sh
+   curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/remote-client-setup.sh
    chmod +x remote-client-setup.sh
    ```
 

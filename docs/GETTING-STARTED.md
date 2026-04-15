@@ -35,7 +35,7 @@ A complete, minimal testing solution to validate the IP-Relay concept:
 gcloud compute ssh ip-relay-vm --zone=us-central1-a
 
 # Download and run deployment script
-curl -O https://raw.githubusercontent.com/your-repo/deploy-gcp-vm.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/deploy-gcp-vm.sh
 chmod +x deploy-gcp-vm.sh
 ./deploy-gcp-vm.sh
 
@@ -45,7 +45,7 @@ chmod +x deploy-gcp-vm.sh
 ### Option B: Docker
 ```bash
 # On your local machine
-git clone https://github.com/your-repo/telenor-router.git
+git clone https://github.com/AiDevAbdul/telenort-router.git
 cd telenor-router
 docker-compose up -d
 
@@ -58,7 +58,7 @@ docker-compose up -d
 gcloud compute ssh ip-relay-vm --zone=us-central1-a
 
 # Run setup script
-curl -O https://raw.githubusercontent.com/your-repo/relay-vm-setup.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/relay-vm-setup.sh
 chmod +x relay-vm-setup.sh
 ./relay-vm-setup.sh
 
@@ -83,7 +83,7 @@ On your home/office PC:
 
 ```bash
 # Download exit agent script
-curl -O https://raw.githubusercontent.com/your-repo/exit-agent.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/exit-agent.sh
 chmod +x exit-agent.sh
 
 # Run with relay VM IP and API URL
@@ -115,7 +115,7 @@ On your remote device (laptop/mobile):
 
 ```bash
 # Download remote client setup script
-curl -O https://raw.githubusercontent.com/your-repo/remote-client-setup.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/remote-client-setup.sh
 chmod +x remote-client-setup.sh
 
 # Run setup

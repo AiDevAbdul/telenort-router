@@ -133,7 +133,7 @@ When testing is complete, you should see:
 gcloud compute ssh ip-relay-vm --zone=us-central1-a
 
 # Run automated deployment
-curl -O https://raw.githubusercontent.com/your-repo/deploy-gcp-vm.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/deploy-gcp-vm.sh
 chmod +x deploy-gcp-vm.sh
 ./deploy-gcp-vm.sh
 
@@ -143,7 +143,7 @@ chmod +x deploy-gcp-vm.sh
 ### Step 2: Run Exit Agent (10 min)
 ```bash
 # On home/office PC
-curl -O https://raw.githubusercontent.com/your-repo/exit-agent.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/exit-agent.sh
 chmod +x exit-agent.sh
 ./exit-agent.sh <RELAY_VM_IP> http://<RELAY_VM_IP>:8000
 
@@ -155,7 +155,7 @@ tail -f /tmp/exit-agent.log
 ### Step 3: Connect Remote Client (5 min)
 ```bash
 # On remote device
-curl -O https://raw.githubusercontent.com/your-repo/remote-client-setup.sh
+curl -O https://raw.githubusercontent.com/AiDevAbdul/telenort-router/main/remote-client-setup.sh
 chmod +x remote-client-setup.sh
 ./remote-client-setup.sh http://<RELAY_VM_IP>:8000 my-device
 
