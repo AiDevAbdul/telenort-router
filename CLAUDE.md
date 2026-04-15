@@ -57,3 +57,9 @@ Add authentication (Clerk/NextAuth), Next.js dashboard, Neon PostgreSQL, key rot
 - No authentication/database/dashboard yet
 - Single region, hardcoded IPs (Phase 2)
 - Cross-platform exit agent support
+
+## File Organization Rules
+- **Root level**: Only code, deployment, context, and original spec files
+- **Documentation**: ALL .md files (except CLAUDE.md and spec.md) MUST be in `/docs` directory
+- **Never create .md files in root** - always use `/docs` directory
+- Keep root clean: only .py, .sh, .yml, .txt, Dockerfile, .service, CLAUDE.md, spec.md
