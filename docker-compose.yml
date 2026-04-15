@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  relay-vm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ip-relay-vm
+    ports:
+      - "51820:51820/udp"
+      - "8000:8000/tcp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    volumes:
+      - /lib/modules:/lib/modules:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - relay-network
+    restart: unless-stopped
+
+networks:
+  relay-network:
+    driver: bridge

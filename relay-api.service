@@ -1,0 +1,18 @@
+[Unit]
+Description=IP-Relay API Service
+After=network.target wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/relay-api
+Environment="PATH=/root/relay-api/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/root/relay-api/venv/bin/python3 /root/relay-api/relay-api.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
