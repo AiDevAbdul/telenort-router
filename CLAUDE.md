@@ -49,8 +49,9 @@ All docs in `/docs` directory:
 - Tunnel stable for 5+ minutes
 - All automated tests pass
 
-## Phase 2 (Future)
+## Phase 2 (In Progress)
 Add authentication (Clerk/NextAuth), Next.js dashboard, Neon PostgreSQL, key rotation, multi-region support.
+See `docs/PHASE-2-PLAN.md` for detailed roadmap and implementation strategy.
 
 ## Important Notes
 - Testing only (not production-ready)
