@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "mcp__chrome-devtools__wait_for",
+      "mcp__chrome-devtools__click"
     ]
   }
 }

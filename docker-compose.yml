@@ -1,7 +1,9 @@
+version: '3.8'
+
 services:
   relay-vm:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: ip-relay-vm
     ports:
@@ -13,11 +15,55 @@ services:
       - SYS_MODULE
     volumes:
       - /lib/modules:/lib/modules:ro
+      - relay-data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=${DATABASE_URL:-postgresql://user:password@localhost:5432/ip_relay}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
+      - SERVER_REGION=${SERVER_REGION:-us-central1}
+      - SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-localhost}
     networks:
       - relay-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ip-relay-dashboard
+    ports:
+      - "3000:3000/tcp"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-}
+      - NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+      - NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+      - NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
+      - NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      relay-vm:
+        condition: service_healthy
+    networks:
+      - relay-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  relay-data:
+    driver: local
 
 networks:
   relay-network:

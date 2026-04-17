@@ -30,6 +30,19 @@ Deployment procedures, startup verification, and infrastructure setup.
 - **REORGANIZATION-SUMMARY.md** - Project reorganization summary
 - **REORGANIZATION-COMPLETE.md** - Reorganization completion confirmation
 
+### [07-deployment](./07-deployment/) ⭐ NEW - GCP Production Deployment
+Complete GCP deployment package for production deployment.
+- **README.md** - Quick start guide and overview
+- **INDEX.md** - GCP deployment documentation index
+- **DEPLOYMENT-SUMMARY.md** - Overview and quick start guide
+- **GCP-DEPLOYMENT-GUIDE.md** - Step-by-step deployment instructions
+- **GCP-DEPLOYMENT-CHECKLIST.md** - Deployment verification checklist
+- **GCP-TROUBLESHOOTING.md** - Common issues and solutions
+- **QUICK-REFERENCE.md** - Essential commands and quick reference
+- **COMPLETION-SUMMARY.md** - Accomplishments and deliverables
+- **SESSION-SUMMARY-2026-04-17.md** - Detailed session summary
+- **FINAL-SESSION-SUMMARY.md** - Complete session overview
+
 ### [04-phase-2](./04-phase-2/)
 Phase 2 planning, sprints, and implementation details.
 - **PHASE-2-PLAN.md** - Phase 2 roadmap and implementation strategy
@@ -72,8 +85,11 @@ Reference materials, checklists, and supporting documentation.
 **New to the project?**
 → Start with [01-getting-started/00-START-HERE.md](./01-getting-started/00-START-HERE.md)
 
-**Need to deploy?**
+**Need to deploy locally?**
 → See [03-deployment/STARTUP-GUIDE.md](./03-deployment/STARTUP-GUIDE.md)
+
+**Ready for GCP production?** ⭐ NEW
+→ See [07-deployment/DEPLOYMENT-SUMMARY.md](./07-deployment/DEPLOYMENT-SUMMARY.md)
 
 **Want technical details?**
 → Read [02-architecture/ARCHITECTURE.md](./02-architecture/ARCHITECTURE.md)

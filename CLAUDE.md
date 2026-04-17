@@ -64,3 +64,12 @@ See `docs/PHASE-2-PLAN.md` for detailed roadmap and implementation strategy.
 - **Documentation**: ALL .md files (except CLAUDE.md and spec.md) MUST be in `/docs` directory
 - **Never create .md files in root** - always use `/docs` directory
 - Keep root clean: only .py, .sh, .yml, .txt, Dockerfile, .service, CLAUDE.md, spec.md
+
+## STRICT: Documentation File Enforcement
+**NO .md files in root directory. PERIOD.**
+- Every documentation file MUST go in `/docs` directory
+- This includes: guides, reports, summaries, checklists, plans, analysis, notes
+- Exceptions ONLY: CLAUDE.md (project instructions), spec.md (original specification)
+- If you create a .md file, it goes in `/docs` - no exceptions
+- If a .md file exists in root, it should be moved to `/docs` immediately
+- Enforce this rule in every session - keep root directory clean
