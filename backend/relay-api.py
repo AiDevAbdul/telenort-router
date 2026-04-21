@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Relay API - Simple service to manage WireGuard peers
+Relay API - FastAPI service with database integration
+Manages WireGuard peers, tunnels, and exit agents
 Run on GCP relay VM
 """
 
@@ -9,17 +10,28 @@ import json
 import os
 import platform
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from datetime import datetime
+from typing import Optional
+import uuid
+
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 import uvicorn
 
-app = FastAPI()
+from db_config import engine, SessionLocal, Base
+from models import User, Tunnel, ExitAgent, APIKey, ConnectionLog
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="IP-Relay API", version="2.0.0")
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,7 +39,7 @@ app.add_middleware(
 
 WG_INTERFACE = "wg0"
 
-# Use platform-specific paths
+# Platform-specific paths
 if platform.system() == "Windows":
     KEYS_DIR = Path.home() / ".wireguard" / "keys"
     WG_CONFIG_PATH = Path.home() / ".wireguard" / "wg0.conf"
@@ -35,30 +47,77 @@ else:
     KEYS_DIR = Path("/etc/wireguard/keys")
     WG_CONFIG_PATH = Path("/etc/wireguard/wg0.conf")
 
-# Ensure keys directory exists
 KEYS_DIR.mkdir(parents=True, exist_ok=True)
 
-# In-memory storage for tunnels (for testing)
-tunnels_store = {}
-next_peer_ip_counter = 2
-
-class PeerRequest(BaseModel):
-    peer_name: str
-    public_key: str
+# Pydantic models
+class TunnelCreate(BaseModel):
+    name: str
     relay_region: str = "us-central1"
 
-class PeerResponse(BaseModel):
-    peer_name: str
-    public_key: str
-    allowed_ip: str
-    status: str
+class TunnelResponse(BaseModel):
+    id: str
+    name: str
+    relay_region: str
+    tunnel_ip_range: str
+    is_active: bool
+    created_at: str
 
+class ExitAgentCreate(BaseModel):
+    name: str
+    tunnel_id: str
+
+class ExitAgentResponse(BaseModel):
+    id: str
+    name: str
+    public_ip: Optional[str]
+    status: str
+    created_at: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: Optional[str]
+    subscription_tier: str
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_current_user(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)) -> User:
+    """Extract user from Clerk token"""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization header")
+
+    try:
+        scheme, token = authorization.split()
+        if scheme.lower() != "bearer":
+            raise HTTPException(status_code=401, detail="Invalid authorization scheme")
+
+        # For now, extract clerk_id from token (in production, verify JWT)
+        # Token format: "clerk_<user_id>"
+        if not token.startswith("clerk_"):
+            raise HTTPException(status_code=401, detail="Invalid token format")
+
+        clerk_id = token
+        user = db.query(User).filter(User.clerk_id == clerk_id).first()
+
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        return user
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+
+# WireGuard utilities
 def get_server_keys():
     """Read server keys from disk"""
     private_key_path = KEYS_DIR / "server_private.key"
     public_key_path = KEYS_DIR / "server_public.key"
 
-    # Generate keys if they don't exist
     if not private_key_path.exists() or not public_key_path.exists():
         try:
             private_key = subprocess.check_output(['wg', 'genkey']).decode().strip()
@@ -66,12 +125,10 @@ def get_server_keys():
                 ['wg', 'pubkey'],
                 input=private_key.encode()
             ).decode().strip()
-
             private_key_path.write_text(private_key)
             public_key_path.write_text(public_key)
         except Exception as e:
             print(f"Warning: Could not generate WireGuard keys: {e}")
-            # Return dummy keys for testing
             return "dummy_private_key", "dummy_public_key"
 
     with open(private_key_path, 'r') as f:
@@ -92,25 +149,28 @@ def generate_keypair():
         return private_key, public_key
     except Exception as e:
         print(f"Warning: Could not generate WireGuard keypair: {e}")
-        # Return dummy keys for testing
-        import uuid
         dummy_key = str(uuid.uuid4())[:32]
         return dummy_key, dummy_key
 
-def get_next_peer_ip():
-    """Get next available IP in 10.0.0.0/24 range"""
-    global next_peer_ip_counter
-    ip = f"10.0.0.{next_peer_ip_counter}/32"
-    next_peer_ip_counter += 1
-    if next_peer_ip_counter > 254:
-        next_peer_ip_counter = 2
-    return ip
+def get_next_peer_ip(db: Session, tunnel_id: str):
+    """Get next available IP in tunnel's range"""
+    tunnel = db.query(Tunnel).filter(Tunnel.id == tunnel_id).first()
+    if not tunnel:
+        raise HTTPException(status_code=404, detail="Tunnel not found")
+
+    # Count existing exit agents for this tunnel
+    agent_count = db.query(ExitAgent).filter(ExitAgent.tunnel_id == tunnel_id).count()
+    ip_num = agent_count + 2
+
+    if ip_num > 254:
+        raise HTTPException(status_code=400, detail="Tunnel IP range exhausted")
+
+    return f"10.0.0.{ip_num}/32"
 
 def add_peer_to_wg(peer_public_key: str, allowed_ip: str):
     """Add peer to WireGuard interface"""
     try:
         if platform.system() == "Windows":
-            # On Windows, use wg command without sudo
             subprocess.run(
                 ['wg', 'set', WG_INTERFACE, 'peer', peer_public_key,
                  'allowed-ips', allowed_ip],
@@ -123,29 +183,23 @@ def add_peer_to_wg(peer_public_key: str, allowed_ip: str):
                 check=True
             )
         return True
-    except subprocess.CalledProcessError as e:
-        print(f"Warning: Could not add peer to WireGuard: {e}")
-        return True  # Return True anyway for testing
     except Exception as e:
-        print(f"Warning: WireGuard command failed: {e}")
-        return True  # Return True anyway for testing
+        print(f"Warning: Could not add peer to WireGuard: {e}")
+        return True
 
+# Public endpoints
 @app.get("/health")
 def health():
     """Health check endpoint"""
-    return {"status": "ok"}
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
 @app.get("/server-config")
 def get_server_config():
     """Get server public key and endpoint"""
     try:
         _, public_key = get_server_keys()
-
-        # Get server's public IP
         try:
             if platform.system() == "Windows":
-                result = subprocess.run(['ipconfig'], capture_output=True, text=True)
-                # For testing, use localhost
                 server_ip = "127.0.0.1"
             else:
                 result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
@@ -162,18 +216,147 @@ def get_server_config():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/generate-client-config")
-def generate_client_config(peer_name: str = "client"):
-    """Generate a complete WireGuard client config"""
-    try:
-        private_key, public_key = generate_keypair()
-        allowed_ip = get_next_peer_ip()
+# User endpoints
+@app.get("/users/me", response_model=UserResponse)
+def get_current_user_info(current_user: User = Depends(get_current_user)):
+    """Get current user info"""
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "subscription_tier": current_user.subscription_tier
+    }
 
-        # Add peer to WireGuard
+# Tunnel endpoints
+@app.get("/tunnels")
+def list_tunnels(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """List user's tunnels"""
+    tunnels = db.query(Tunnel).filter(Tunnel.user_id == current_user.id).all()
+    return {
+        "tunnels": [
+            {
+                "id": str(t.id),
+                "name": t.name,
+                "relay_region": t.relay_region,
+                "tunnel_ip_range": t.tunnel_ip_range,
+                "is_active": t.is_active,
+                "created_at": t.created_at.isoformat()
+            }
+            for t in tunnels
+        ]
+    }
+
+@app.post("/tunnels", response_model=dict)
+def create_tunnel(
+    tunnel_data: TunnelCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new tunnel"""
+    try:
+        tunnel = Tunnel(
+            user_id=current_user.id,
+            name=tunnel_data.name,
+            relay_region=tunnel_data.relay_region,
+            tunnel_ip_range="10.0.0.0/24",
+            is_active=True
+        )
+        db.add(tunnel)
+        db.commit()
+        db.refresh(tunnel)
+
+        # Log creation
+        log = ConnectionLog(
+            tunnel_id=tunnel.id,
+            event="tunnel_created",
+            details={"name": tunnel.name, "region": tunnel.relay_region}
+        )
+        db.add(log)
+        db.commit()
+
+        return {
+            "id": str(tunnel.id),
+            "name": tunnel.name,
+            "relay_region": tunnel.relay_region,
+            "tunnel_ip_range": tunnel.tunnel_ip_range,
+            "is_active": tunnel.is_active,
+            "created_at": tunnel.created_at.isoformat()
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/tunnels/{tunnel_id}")
+def get_tunnel(
+    tunnel_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get tunnel details"""
+    tunnel = db.query(Tunnel).filter(
+        Tunnel.id == tunnel_id,
+        Tunnel.user_id == current_user.id
+    ).first()
+
+    if not tunnel:
+        raise HTTPException(status_code=404, detail="Tunnel not found")
+
+    return {
+        "id": str(tunnel.id),
+        "name": tunnel.name,
+        "relay_region": tunnel.relay_region,
+        "tunnel_ip_range": tunnel.tunnel_ip_range,
+        "is_active": tunnel.is_active,
+        "created_at": tunnel.created_at.isoformat()
+    }
+
+@app.delete("/tunnels/{tunnel_id}")
+def delete_tunnel(
+    tunnel_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a tunnel"""
+    try:
+        tunnel = db.query(Tunnel).filter(
+            Tunnel.id == tunnel_id,
+            Tunnel.user_id == current_user.id
+        ).first()
+
+        if not tunnel:
+            raise HTTPException(status_code=404, detail="Tunnel not found")
+
+        db.delete(tunnel)
+        db.commit()
+
+        return {"status": "deleted", "id": tunnel_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate-client-config")
+def generate_client_config(
+    tunnel_id: str,
+    peer_name: str = "client",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Generate WireGuard client config"""
+    try:
+        tunnel = db.query(Tunnel).filter(
+            Tunnel.id == tunnel_id,
+            Tunnel.user_id == current_user.id
+        ).first()
+
+        if not tunnel:
+            raise HTTPException(status_code=404, detail="Tunnel not found")
+
+        private_key, public_key = generate_keypair()
+        allowed_ip = get_next_peer_ip(db, tunnel_id)
+
         add_peer_to_wg(public_key, allowed_ip)
 
-        # Get server config
-        server_private, server_public = get_server_keys()
+        _, server_public = get_server_keys()
         try:
             if platform.system() == "Windows":
                 server_ip = "127.0.0.1"
@@ -183,7 +366,6 @@ def generate_client_config(peer_name: str = "client"):
         except:
             server_ip = "127.0.0.1"
 
-        # Generate client config
         client_config = f"""[Interface]
 Address = {allowed_ip.split('/')[0]}/24
 PrivateKey = {private_key}
@@ -196,7 +378,6 @@ AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 """
 
-        # Save config for reference
         config_path = KEYS_DIR / f"{peer_name}.conf"
         config_path.write_text(client_config)
 
@@ -211,138 +392,86 @@ PersistentKeepalive = 25
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/peers")
-def list_peers():
-    """List all connected peers"""
-    try:
-        if platform.system() == "Windows":
-            result = subprocess.run(['wg', 'show', WG_INTERFACE],
-                                  capture_output=True, text=True)
-        else:
-            result = subprocess.run(['sudo', 'wg', 'show', WG_INTERFACE],
-                                  capture_output=True, text=True)
-        return {"peers_output": result.stdout if result.stdout else "No peers connected"}
-    except Exception as e:
-        print(f"Warning: Could not list peers: {e}")
-        return {"peers_output": "No peers connected"}
-
-@app.get("/status")
-def get_status():
-    """Get WireGuard interface status"""
-    try:
-        if platform.system() == "Windows":
-            result = subprocess.run(['wg', 'show', WG_INTERFACE],
-                                  capture_output=True, text=True)
-        else:
-            result = subprocess.run(['sudo', 'wg', 'show', WG_INTERFACE],
-                                  capture_output=True, text=True)
-        return {"status": result.stdout if result.stdout else "WireGuard interface not active"}
-    except Exception as e:
-        print(f"Warning: Could not get status: {e}")
-        return {"status": "WireGuard interface not active"}
-
-@app.get("/tunnels")
-def list_tunnels():
-    """List all active tunnels"""
-    return {"tunnels": list(tunnels_store.values())}
-
-@app.post("/tunnels")
-def create_tunnel(request: PeerRequest):
-    """Create a new tunnel"""
-    try:
-        private_key, public_key = generate_keypair()
-        allowed_ip = get_next_peer_ip()
-
-        # Add peer to WireGuard
-        add_peer_to_wg(public_key, allowed_ip)
-
-        tunnel_data = {
-            "id": f"tunnel-{public_key[:8]}",
-            "name": request.peer_name,
-            "public_key": public_key,
-            "private_key": private_key,
-            "allowed_ip": allowed_ip,
-            "status": "created",
-            "is_active": True,
-            "tunnel_ip_range": allowed_ip,
-            "relay_region": request.relay_region,
-            "created_at": str(__import__('datetime').datetime.utcnow().isoformat())
-        }
-
-        # Store tunnel in memory
-        tunnels_store[tunnel_data["id"]] = tunnel_data
-
-        return tunnel_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/tunnels/{tunnel_id}")
-def delete_tunnel(tunnel_id: str):
-    """Delete a tunnel"""
-    try:
-        if tunnel_id in tunnels_store:
-            del tunnels_store[tunnel_id]
-            return {"status": "deleted", "id": tunnel_id}
-        else:
-            raise HTTPException(status_code=404, detail="Tunnel not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# In-memory storage for exit agents
-exit_agents_store = {}
-next_agent_id_counter = 1
-
-class ExitAgentRequest(BaseModel):
-    name: str
-
+# Exit Agent endpoints
 @app.get("/exit-agents")
-def list_exit_agents():
-    """List all exit agents"""
-    try:
-        return {"exit_agents": list(exit_agents_store.values())}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def list_exit_agents(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List user's exit agents"""
+    agents = db.query(ExitAgent).filter(ExitAgent.user_id == current_user.id).all()
+    return {
+        "exit_agents": [
+            {
+                "id": str(a.id),
+                "name": a.name,
+                "public_ip": a.public_ip,
+                "status": a.status,
+                "created_at": a.created_at.isoformat()
+            }
+            for a in agents
+        ]
+    }
 
-@app.post("/exit-agents")
-def create_exit_agent(request: ExitAgentRequest):
+@app.post("/exit-agents", response_model=dict)
+def create_exit_agent(
+    agent_data: ExitAgentCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Register a new exit agent"""
     try:
-        global next_agent_id_counter
+        tunnel = db.query(Tunnel).filter(
+            Tunnel.id == agent_data.tunnel_id,
+            Tunnel.user_id == current_user.id
+        ).first()
 
-        # Generate token for the agent
-        import uuid
-        token = str(uuid.uuid4())
+        if not tunnel:
+            raise HTTPException(status_code=404, detail="Tunnel not found")
 
-        agent_id = f"agent-{next_agent_id_counter}"
-        next_agent_id_counter += 1
+        agent = ExitAgent(
+            user_id=current_user.id,
+            tunnel_id=tunnel.id,
+            name=agent_data.name,
+            status="pending"
+        )
+        db.add(agent)
+        db.commit()
+        db.refresh(agent)
 
-        agent_data = {
-            "id": agent_id,
-            "name": request.name,
-            "token": token,
-            "status": "pending",
-            "public_ip": None,
-            "tunnel_ip": None,
-            "created_at": str(__import__('datetime').datetime.utcnow().isoformat())
+        return {
+            "id": str(agent.id),
+            "name": agent.name,
+            "public_ip": agent.public_ip,
+            "status": agent.status,
+            "created_at": agent.created_at.isoformat()
         }
-
-        # Store agent in memory
-        exit_agents_store[agent_id] = agent_data
-
-        return agent_data
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/exit-agents/{agent_id}")
-def delete_exit_agent(agent_id: str):
+def delete_exit_agent(
+    agent_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """Delete an exit agent"""
     try:
-        if agent_id in exit_agents_store:
-            del exit_agents_store[agent_id]
-            return {"status": "deleted", "id": agent_id}
-        else:
+        agent = db.query(ExitAgent).filter(
+            ExitAgent.id == agent_id,
+            ExitAgent.user_id == current_user.id
+        ).first()
+
+        if not agent:
             raise HTTPException(status_code=404, detail="Exit agent not found")
+
+        db.delete(agent)
+        db.commit()
+
+        return {"status": "deleted", "id": agent_id}
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
