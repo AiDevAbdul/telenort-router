@@ -1,0 +1,22 @@
+# Example Terraform variables
+# Copy to terraform.tfvars and fill in your values
+
+gcp_project_id = "your-gcp-project-id"
+primary_region = "us-central1"
+
+relay_regions = [
+  "us-central1",
+  "europe-west1",
+  "asia-southeast1"
+]
+
+machine_type   = "e2-medium"
+boot_disk_size = 20
+
+# Get these from your Neon PostgreSQL project
+database_url = "postgresql://neondb_owner:npg_xxxxx@ep-xxxxx-pooler.c-2.aws.neon.tech/neondb?sslmode=require"
+
+# Get this from your Clerk dashboard
+clerk_secret_key = "sk_live_xxxxx"
+
+environment = "prod"

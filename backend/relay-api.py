@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 import uuid
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +23,9 @@ import uvicorn
 
 from db_config import engine, SessionLocal, Base
 from models import User, Tunnel, ExitAgent, APIKey, ConnectionLog
+
+# Load environment variables
+load_dotenv(".env.local")
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -38,6 +42,30 @@ app.add_middleware(
 )
 
 WG_INTERFACE = "wg0"
+
+# Multi-region configuration
+RELAY_REGION = os.getenv("RELAY_REGION", "us-central1")
+RELAY_API_PORT = int(os.getenv("RELAY_API_PORT", "8000"))
+WIREGUARD_PORT = int(os.getenv("WIREGUARD_PORT", "51820"))
+
+# Region metadata
+REGION_METADATA = {
+    "us-central1": {
+        "name": "North America (US Central)",
+        "country": "USA",
+        "latency_target_ms": 50
+    },
+    "europe-west1": {
+        "name": "Europe (West)",
+        "country": "Belgium",
+        "latency_target_ms": 50
+    },
+    "asia-southeast1": {
+        "name": "Asia-Pacific (Southeast)",
+        "country": "Singapore",
+        "latency_target_ms": 50
+    }
+}
 
 # Platform-specific paths
 if platform.system() == "Windows":
@@ -195,7 +223,7 @@ def health():
 
 @app.get("/server-config")
 def get_server_config():
-    """Get server public key and endpoint"""
+    """Get server public key, endpoint, and region info"""
     try:
         _, public_key = get_server_keys()
         try:
@@ -207,14 +235,55 @@ def get_server_config():
         except:
             server_ip = "127.0.0.1"
 
+        region_info = REGION_METADATA.get(RELAY_REGION, {
+            "name": RELAY_REGION,
+            "country": "Unknown",
+            "latency_target_ms": 100
+        })
+
         return {
             "server_public_key": public_key,
             "server_ip": server_ip,
-            "listen_port": 51820,
-            "server_tunnel_ip": "10.0.0.1"
+            "listen_port": WIREGUARD_PORT,
+            "server_tunnel_ip": "10.0.0.1",
+            "region": RELAY_REGION,
+            "region_name": region_info["name"],
+            "country": region_info["country"],
+            "api_port": RELAY_API_PORT,
+            "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Region endpoints
+@app.get("/regions")
+def list_regions():
+    """List all available relay regions"""
+    return {
+        "regions": [
+            {
+                "id": region_id,
+                "name": info["name"],
+                "country": info["country"],
+                "latency_target_ms": info["latency_target_ms"]
+            }
+            for region_id, info in REGION_METADATA.items()
+        ]
+    }
+
+@app.get("/regions/{region_id}")
+def get_region_info(region_id: str):
+    """Get info about a specific region"""
+    if region_id not in REGION_METADATA:
+        raise HTTPException(status_code=404, detail="Region not found")
+
+    info = REGION_METADATA[region_id]
+    return {
+        "id": region_id,
+        "name": info["name"],
+        "country": info["country"],
+        "latency_target_ms": info["latency_target_ms"]
+    }
 
 # User endpoints
 @app.get("/users/me", response_model=UserResponse)
@@ -338,10 +407,11 @@ def delete_tunnel(
 def generate_client_config(
     tunnel_id: str,
     peer_name: str = "client",
+    preferred_region: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Generate WireGuard client config"""
+    """Generate WireGuard client config with region awareness"""
     try:
         tunnel = db.query(Tunnel).filter(
             Tunnel.id == tunnel_id,
@@ -350,6 +420,11 @@ def generate_client_config(
 
         if not tunnel:
             raise HTTPException(status_code=404, detail="Tunnel not found")
+
+        # Use preferred region or tunnel's configured region
+        target_region = preferred_region or tunnel.relay_region
+        if target_region not in REGION_METADATA:
+            target_region = tunnel.relay_region
 
         private_key, public_key = generate_keypair()
         allowed_ip = get_next_peer_ip(db, tunnel_id)
@@ -373,7 +448,7 @@ DNS = 8.8.8.8
 
 [Peer]
 PublicKey = {server_public}
-Endpoint = {server_ip}:51820
+Endpoint = {server_ip}:{WIREGUARD_PORT}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 """
@@ -381,12 +456,28 @@ PersistentKeepalive = 25
         config_path = KEYS_DIR / f"{peer_name}.conf"
         config_path.write_text(client_config)
 
+        # Log config generation
+        log = ConnectionLog(
+            tunnel_id=tunnel.id,
+            event="client_config_generated",
+            details={
+                "peer_name": peer_name,
+                "region": target_region,
+                "allowed_ip": allowed_ip
+            }
+        )
+        db.add(log)
+        db.commit()
+
         return {
             "peer_name": peer_name,
             "public_key": public_key,
             "private_key": private_key,
             "allowed_ip": allowed_ip,
             "config": client_config,
+            "region": target_region,
+            "server_ip": server_ip,
+            "wireguard_port": WIREGUARD_PORT,
             "status": "created"
         }
     except Exception as e:
