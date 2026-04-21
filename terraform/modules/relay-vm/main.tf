@@ -80,7 +80,7 @@ resource "google_compute_instance" "relay_vm" {
 
   boot_disk {
     initialize_params {
-      image = "debian-12-amd64-v20240415"
+      image = "debian-12"
       size  = var.boot_disk_size
     }
   }

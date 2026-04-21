@@ -6,12 +6,6 @@ terraform {
       version = "~> 5.0"
     }
   }
-
-  # Uncomment for remote state (after first apply)
-  # backend "gcs" {
-  #   bucket = "ip-relay-terraform-state"
-  #   prefix = "terraform/state"
-  # }
 }
 
 provider "google" {
@@ -25,11 +19,6 @@ resource "google_project_service" "compute" {
   disable_on_destroy = false
 }
 
-resource "google_project_service" "cloudresourcemanager" {
-  service            = "cloudresourcemanager.googleapis.com"
-  disable_on_destroy = false
-}
-
 # VPC Network
 resource "google_compute_network" "relay_network" {
   name                    = "ip-relay-network"
@@ -37,12 +26,11 @@ resource "google_compute_network" "relay_network" {
   depends_on              = [google_project_service.compute]
 }
 
-# Subnets for each region
+# Subnet for primary region
 resource "google_compute_subnetwork" "relay_subnet" {
-  for_each      = toset(var.relay_regions)
-  name          = "ip-relay-subnet-${each.value}"
-  ip_cidr_range = "10.${index(var.relay_regions, each.value)}.0.0/20"
-  region        = each.value
+  name          = "ip-relay-subnet"
+  ip_cidr_range = "10.0.0.0/20"
+  region        = var.primary_region
   network       = google_compute_network.relay_network.id
 }
 
@@ -89,7 +77,7 @@ resource "google_service_account" "relay_vm" {
   display_name = "IP-Relay VM Service Account"
 }
 
-# IAM role for relay VMs
+# IAM roles for relay VMs
 resource "google_project_iam_member" "relay_vm_logs" {
   project = var.gcp_project_id
   role    = "roles/logging.logWriter"
@@ -102,22 +90,41 @@ resource "google_project_iam_member" "relay_vm_metrics" {
   member  = "serviceAccount:${google_service_account.relay_vm.email}"
 }
 
-# Relay VMs in each region
-module "relay_vm" {
-  for_each = toset(var.relay_regions)
+# Relay VM instance
+resource "google_compute_instance" "relay_vm" {
+  name         = "ip-relay-vm"
+  machine_type = var.machine_type
+  zone         = "${var.primary_region}-a"
 
-  source = "./modules/relay-vm"
+  boot_disk {
+    initialize_params {
+      image = "debian-12"
+      size  = var.boot_disk_size
+    }
+  }
 
-  region              = each.value
-  zone                = "${each.value}-a"
-  network_id          = google_compute_network.relay_network.id
-  subnet_id           = google_compute_subnetwork.relay_subnet[each.value].id
-  service_account     = google_service_account.relay_vm.email
-  machine_type        = var.machine_type
-  boot_disk_size      = var.boot_disk_size
-  database_url        = var.database_url
-  clerk_secret_key    = var.clerk_secret_key
-  environment         = var.environment
+  network_interface {
+    network    = google_compute_network.relay_network.id
+    subnetwork = google_compute_subnetwork.relay_subnet.id
+
+    access_config {
+      # Ephemeral public IP
+    }
+  }
+
+  service_account {
+    email  = google_service_account.relay_vm.email
+    scopes = ["cloud-platform"]
+  }
+
+  metadata = {
+    startup-script = base64encode(templatefile("${path.module}/modules/relay-vm/startup.sh", {
+      database_url     = var.database_url
+      clerk_secret_key = var.clerk_secret_key
+      environment      = var.environment
+      region           = var.primary_region
+    }))
+  }
 
   depends_on = [
     google_project_service.compute,
@@ -127,51 +134,12 @@ module "relay_vm" {
   ]
 }
 
-# Health check for load balancer
-resource "google_compute_health_check" "relay_health" {
-  name = "ip-relay-health-check"
-
-  tcp_health_check {
-    port = "8000"
-  }
-
-  check_interval_sec  = 10
-  timeout_sec         = 5
-  healthy_threshold   = 2
-  unhealthy_threshold = 3
-}
-
-# Backend service for load balancer
-resource "google_compute_backend_service" "relay_backend" {
-  name            = "ip-relay-backend"
-  protocol        = "TCP"
-  health_checks   = [google_compute_health_check.relay_health.id]
-  session_affinity = "CLIENT_IP"
-  timeout_sec     = 30
-
-  dynamic "backend" {
-    for_each = module.relay_vm
-    content {
-      group           = backend.value.instance_group_id
-      balancing_mode  = "RATE"
-      max_rate_per_endpoint = 1000
-    }
-  }
-}
-
-# Global forwarding rule
-resource "google_compute_global_forwarding_rule" "relay_lb" {
-  name       = "ip-relay-lb"
-  ip_version = "IPV4"
-  load_balancing_scheme = "EXTERNAL"
-  service    = google_compute_backend_service.relay_backend.id
-}
-
 # Reserve static IP for load balancer
 resource "google_compute_address" "relay_lb_ip" {
   name          = "ip-relay-lb-ip"
   address_type  = "EXTERNAL"
   ip_version    = "IPV4"
+  region        = var.primary_region
 }
 
 # Output the load balancer IP
@@ -180,16 +148,7 @@ output "load_balancer_ip" {
   description = "Load balancer external IP"
 }
 
-output "relay_vm_ips" {
-  value = {
-    for region, vm in module.relay_vm : region => vm.external_ip
-  }
-  description = "External IPs of relay VMs by region"
-}
-
-output "relay_vm_internal_ips" {
-  value = {
-    for region, vm in module.relay_vm : region => vm.internal_ip
-  }
-  description = "Internal IPs of relay VMs by region"
+output "relay_vm_ip" {
+  value       = google_compute_instance.relay_vm.network_interface[0].access_config[0].nat_ip
+  description = "External IP of relay VM"
 }
