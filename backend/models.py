@@ -3,8 +3,8 @@ Database models for Phase 2
 Users, Tunnels, Exit Agents, API Keys, Connection Logs
 """
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, JSONB, Boolean
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
