@@ -5,9 +5,13 @@ Creates all tables and indexes
 
 import os
 import uuid
+from dotenv import load_dotenv
 from sqlalchemy import text
 from db_config import engine, SessionLocal, Base
 from models import User, Tunnel, ExitAgent, APIKey, ConnectionLog
+
+# Load environment variables from .env.local
+load_dotenv(".env.local")
 
 def verify_connection():
     """Verify database connection"""
@@ -15,10 +19,10 @@ def verify_connection():
         db = SessionLocal()
         db.execute(text("SELECT 1"))
         db.close()
-        print("✓ Database connection successful")
+        print("[OK] Database connection successful")
         return True
     except Exception as e:
-        print(f"✗ Database connection failed: {e}")
+        print(f"[ERROR] Database connection failed: {e}")
         print("  Set DATABASE_URL environment variable")
         return False
 
@@ -26,7 +30,7 @@ def init_db():
     """Initialize database with all tables"""
     print("Creating database tables...")
     Base.metadata.create_all(bind=engine)
-    print("✓ Database tables created successfully")
+    print("[OK] Database tables created successfully")
     print("\nTables created:")
     print("  - users")
     print("  - tunnels")
@@ -40,7 +44,7 @@ def create_test_user():
     try:
         existing = db.query(User).filter(User.email == "test@example.com").first()
         if existing:
-            print("✓ Test user already exists")
+            print("[OK] Test user already exists")
             return existing
 
         test_user = User(
@@ -53,11 +57,11 @@ def create_test_user():
         db.add(test_user)
         db.commit()
         db.refresh(test_user)
-        print(f"✓ Test user created: {test_user.email}")
+        print(f"[OK] Test user created: {test_user.email}")
         return test_user
     except Exception as e:
         db.rollback()
-        print(f"✗ Error creating test user: {e}")
+        print(f"[ERROR] Error creating test user: {e}")
         return None
     finally:
         db.close()
@@ -77,11 +81,11 @@ def create_test_tunnel(user_id):
         db.add(test_tunnel)
         db.commit()
         db.refresh(test_tunnel)
-        print(f"✓ Test tunnel created: {test_tunnel.name}")
+        print(f"[OK] Test tunnel created: {test_tunnel.name}")
         return test_tunnel
     except Exception as e:
         db.rollback()
-        print(f"✗ Error creating test tunnel: {e}")
+        print(f"[ERROR] Error creating test tunnel: {e}")
         return None
     finally:
         db.close()

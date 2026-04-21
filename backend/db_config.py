@@ -4,9 +4,13 @@ Connects to Neon PostgreSQL
 """
 
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
+
+# Load environment variables from .env.local
+load_dotenv(".env.local")
 
 # Get database URL from environment variable
 DATABASE_URL = os.getenv(
