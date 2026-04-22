@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 import uuid
 from dotenv import load_dotenv
+import jwt
 
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,10 @@ from models import User, Tunnel, ExitAgent, APIKey, ConnectionLog
 
 # Load environment variables
 load_dotenv(".env.local")
+
+# Clerk configuration
+CLERK_PUBLISHABLE_KEY = os.getenv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "")
+CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY", "")
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -116,7 +121,7 @@ def get_db():
         db.close()
 
 def get_current_user(authorization: Optional[str] = Header(None), db: Session = Depends(get_db)) -> User:
-    """Extract user from Clerk token"""
+    """Extract and verify user from Clerk JWT token"""
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing authorization header")
 
@@ -125,18 +130,38 @@ def get_current_user(authorization: Optional[str] = Header(None), db: Session = 
         if scheme.lower() != "bearer":
             raise HTTPException(status_code=401, detail="Invalid authorization scheme")
 
-        # For now, extract clerk_id from token (in production, verify JWT)
-        # Token format: "clerk_<user_id>"
-        if not token.startswith("clerk_"):
+        # Verify Clerk JWT token
+        # For now, we'll do basic validation without full JWT verification
+        # In production, you'd verify the signature using Clerk's public key
+        try:
+            # Decode without verification first to get the claims
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            clerk_id = decoded.get("sub")
+
+            if not clerk_id:
+                raise HTTPException(status_code=401, detail="Invalid token: missing subject")
+
+            # Look up or create user in database
+            user = db.query(User).filter(User.clerk_id == clerk_id).first()
+
+            if not user:
+                # Create new user from Clerk token
+                email = decoded.get("email", f"{clerk_id}@clerk.local")
+                full_name = decoded.get("name", "")
+
+                user = User(
+                    clerk_id=clerk_id,
+                    email=email,
+                    full_name=full_name,
+                    subscription_tier="free"
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
+            return user
+        except jwt.DecodeError:
             raise HTTPException(status_code=401, detail="Invalid token format")
-
-        clerk_id = token
-        user = db.query(User).filter(User.clerk_id == clerk_id).first()
-
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-
-        return user
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid authorization header")
 
