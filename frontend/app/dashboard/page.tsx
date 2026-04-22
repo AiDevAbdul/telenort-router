@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useUser } from "@clerk/nextjs";
-import apiClient from "@/lib/api-client";
+import { useUser, useAuth } from "@clerk/nextjs";
+import apiClient, { setClerkToken } from "@/lib/api-client";
 import { useAppStore, Tunnel } from "@/lib/store";
 import Link from "next/link";
 import { Plus, AlertCircle } from "lucide-react";
@@ -16,6 +16,7 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const { user } = useUser();
+  const { getToken } = useAuth();
   const { tunnels, setTunnels, isLoading, setIsLoading, error, setError } = useAppStore();
   const [stats, setStats] = useState<DashboardStats>({
     totalTunnels: 0,
@@ -28,6 +29,18 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         setIsLoading(true);
+        setError(""); // Clear previous errors
+
+        // Get and set the Clerk token
+        const token = await getToken();
+        if (token) {
+          setClerkToken(token);
+        } else {
+          setError("Failed to get authentication token");
+          setIsLoading(false);
+          return;
+        }
+
         const response = await apiClient.get("/tunnels");
 
         // Handle both array and object responses
@@ -49,9 +62,33 @@ export default function DashboardPage() {
           totalExitAgents: 0, // Will be calculated from exit agents
           onlineAgents: 0,
         });
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Failed to fetch data";
-        setError(errorMessage);
+      } catch (err: any) {
+        // Don't redirect on 401, just show error
+        if (err.response?.status === 401) {
+          setError("Authentication failed. Please sign in again.");
+        } else if (err.code === "ECONNREFUSED") {
+          setError("Backend API is not running. Please start the backend server.");
+        } else {
+          let errorMessage = "Failed to fetch data";
+
+          if (err.response?.data) {
+            const data = err.response.data;
+            // Handle Pydantic validation errors (array of error objects)
+            if (Array.isArray(data)) {
+              errorMessage = data.map((e: any) => e.msg || e.detail).join(", ");
+            }
+            // Handle standard error response with detail field
+            else if (data.detail) {
+              errorMessage = typeof data.detail === "string"
+                ? data.detail
+                : JSON.stringify(data.detail);
+            }
+          } else if (err instanceof Error) {
+            errorMessage = err.message;
+          }
+
+          setError(errorMessage);
+        }
       } finally {
         setIsLoading(false);
       }

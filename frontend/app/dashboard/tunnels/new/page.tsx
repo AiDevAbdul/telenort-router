@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import apiClient from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
+import apiClient, { setClerkToken } from "@/lib/api-client";
 import { useAppStore } from "@/lib/store";
 import Link from "next/link";
 import { ArrowLeft, AlertCircle, PlusCircle, Info } from "lucide-react";
@@ -15,6 +16,7 @@ const REGIONS = [
 
 export default function CreateTunnelPage() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const { addTunnel, setError, error } = useAppStore();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -36,15 +38,43 @@ export default function CreateTunnelPage() {
 
     try {
       setLoading(true);
+
+      // Get and set the Clerk token
+      const token = await getToken();
+      if (token) {
+        setClerkToken(token);
+      } else {
+        setError("Failed to get authentication token");
+        setLoading(false);
+        return;
+      }
+
       const response = await apiClient.post("/tunnels", {
-        peer_name: formData.name,
-        public_key: "",
+        name: formData.name,
         relay_region: formData.relay_region
       });
       addTunnel(response.data);
       router.push("/dashboard/tunnels");
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to create tunnel");
+      let errorMessage = "Failed to create tunnel";
+
+      if (err.response?.data) {
+        const data = err.response.data;
+        // Handle Pydantic validation errors (array of error objects)
+        if (Array.isArray(data)) {
+          errorMessage = data.map((e: any) => e.msg || e.detail).join(", ");
+        }
+        // Handle standard error response with detail field
+        else if (data.detail) {
+          errorMessage = typeof data.detail === "string"
+            ? data.detail
+            : JSON.stringify(data.detail);
+        }
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

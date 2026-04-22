@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useUser } from "@clerk/nextjs";
-import apiClient from "@/lib/api-client";
+import { useUser, useAuth } from "@clerk/nextjs";
+import apiClient, { setClerkToken } from "@/lib/api-client";
 import Link from "next/link";
 import { Plus, Trash2, Eye, AlertCircle } from "lucide-react";
 
@@ -17,6 +17,7 @@ interface ExitAgent {
 
 export default function ExitAgentsPage() {
   const { user } = useUser();
+  const { getToken } = useAuth();
   const [agents, setAgents] = useState<ExitAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,10 +27,41 @@ export default function ExitAgentsPage() {
     const fetchAgents = async () => {
       try {
         setLoading(true);
-        // In a real app, this would fetch from /exit-agents endpoint
-        setAgents([]);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Failed to fetch exit agents";
+
+        // Get and set the Clerk token
+        const token = await getToken();
+        if (token) {
+          setClerkToken(token);
+        }
+
+        // Fetch exit agents from API
+        const response = await apiClient.get("/exit-agents");
+        let agentData: ExitAgent[] = [];
+        if (response.data?.exit_agents && Array.isArray(response.data.exit_agents)) {
+          agentData = response.data.exit_agents;
+        } else if (Array.isArray(response.data)) {
+          agentData = response.data;
+        }
+        setAgents(agentData);
+      } catch (err: any) {
+        let errorMessage = "Failed to fetch exit agents";
+
+        if (err.response?.data) {
+          const data = err.response.data;
+          // Handle Pydantic validation errors (array of error objects)
+          if (Array.isArray(data)) {
+            errorMessage = data.map((e: any) => e.msg || e.detail).join(", ");
+          }
+          // Handle standard error response with detail field
+          else if (data.detail) {
+            errorMessage = typeof data.detail === "string"
+              ? data.detail
+              : JSON.stringify(data.detail);
+          }
+        } else if (err instanceof Error) {
+          errorMessage = err.message;
+        }
+
         setError(errorMessage);
       } finally {
         setLoading(false);
@@ -39,17 +71,41 @@ export default function ExitAgentsPage() {
     if (user) {
       fetchAgents();
     }
-  }, [user]);
+  }, [user, getToken]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this exit agent?")) return;
 
     try {
       setDeleting(id);
+
+      // Get and set the Clerk token
+      const token = await getToken();
+      if (token) {
+        setClerkToken(token);
+      }
+
       await apiClient.delete(`/exit-agents/${id}`);
       setAgents(Array.isArray(agents) ? agents.filter((a) => a.id !== id) : []);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to delete exit agent";
+    } catch (err: any) {
+      let errorMessage = "Failed to delete exit agent";
+
+      if (err.response?.data) {
+        const data = err.response.data;
+        // Handle Pydantic validation errors (array of error objects)
+        if (Array.isArray(data)) {
+          errorMessage = data.map((e: any) => e.msg || e.detail).join(", ");
+        }
+        // Handle standard error response with detail field
+        else if (data.detail) {
+          errorMessage = typeof data.detail === "string"
+            ? data.detail
+            : JSON.stringify(data.detail);
+        }
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+
       setError(errorMessage);
     } finally {
       setDeleting(null);

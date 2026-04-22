@@ -9,11 +9,17 @@ export const apiClient = axios.create({
   },
 });
 
+// Token will be set by the interceptor
+let clerkToken: string | null = null;
+
+export const setClerkToken = (token: string | null) => {
+  clerkToken = token;
+};
+
 // Add token to requests
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem("clerk_token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  if (clerkToken) {
+    config.headers.Authorization = `Bearer ${clerkToken}`;
   }
   return config;
 });
@@ -22,10 +28,8 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("clerk_token");
-      window.location.href = "/auth/login";
-    }
+    // Don't auto-redirect on 401, let the component handle it
+    // This prevents redirect loops
     return Promise.reject(error);
   }
 );

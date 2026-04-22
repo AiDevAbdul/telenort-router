@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import apiClient from "@/lib/api-client";
+import { useAuth } from "@clerk/nextjs";
+import apiClient, { setClerkToken } from "@/lib/api-client";
 import Link from "next/link";
 import { ArrowLeft, Copy, Download, AlertCircle } from "lucide-react";
 
@@ -26,6 +27,7 @@ interface ClientConfig {
 
 export default function TunnelDetailPage() {
   const params = useParams();
+  const { getToken } = useAuth();
   const tunnelId = params.id as string;
   const [tunnel, setTunnel] = useState<TunnelDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,17 +42,42 @@ export default function TunnelDetailPage() {
     const fetchTunnel = async () => {
       try {
         setLoading(true);
+
+        // Get and set the Clerk token
+        const token = await getToken();
+        if (token) {
+          setClerkToken(token);
+        }
+
         const response = await apiClient.get(`/tunnels/${tunnelId}`);
         setTunnel(response.data);
       } catch (err: any) {
-        setError(err.message || "Failed to fetch tunnel");
+        let errorMessage = "Failed to fetch tunnel";
+
+        if (err.response?.data) {
+          const data = err.response.data;
+          // Handle Pydantic validation errors (array of error objects)
+          if (Array.isArray(data)) {
+            errorMessage = data.map((e: any) => e.msg || e.detail).join(", ");
+          }
+          // Handle standard error response with detail field
+          else if (data.detail) {
+            errorMessage = typeof data.detail === "string"
+              ? data.detail
+              : JSON.stringify(data.detail);
+          }
+        } else if (err instanceof Error) {
+          errorMessage = err.message;
+        }
+
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     };
 
     fetchTunnel();
-  }, [tunnelId]);
+  }, [tunnelId, getToken]);
 
   const handleGenerateConfig = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,15 +89,42 @@ export default function TunnelDetailPage() {
 
     try {
       setGeneratingConfig(true);
-      const response = await apiClient.post("/generate-client-config", {
-        tunnel_id: tunnelId,
-        client_name: clientName,
+
+      // Get and set the Clerk token
+      const token = await getToken();
+      if (token) {
+        setClerkToken(token);
+      }
+
+      const response = await apiClient.post("/generate-client-config", null, {
+        params: {
+          tunnel_id: tunnelId,
+          peer_name: clientName,
+        },
       });
       setGeneratedConfig(response.data);
       setClientName("");
       setShowConfigForm(false);
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to generate config");
+      let errorMessage = "Failed to generate config";
+
+      if (err.response?.data) {
+        const data = err.response.data;
+        // Handle Pydantic validation errors (array of error objects)
+        if (Array.isArray(data)) {
+          errorMessage = data.map((e: any) => e.msg || e.detail).join(", ");
+        }
+        // Handle standard error response with detail field
+        else if (data.detail) {
+          errorMessage = typeof data.detail === "string"
+            ? data.detail
+            : JSON.stringify(data.detail);
+        }
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+
+      setError(errorMessage);
     } finally {
       setGeneratingConfig(false);
     }
@@ -126,9 +180,9 @@ export default function TunnelDetailPage() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-gap-3">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-          <p className="text-red-800">{error}</p>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <p className="text-red-800 text-sm">{error}</p>
         </div>
       )}
 
